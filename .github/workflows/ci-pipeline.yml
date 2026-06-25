@@ -1,0 +1,121 @@
+name: Node.js CI Pipeline
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+
+  # ── Job 1: FAILS with real npm engine incompatibility ──
+  # Uses Node 12 but package.json requires node >=16
+  node-version-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js 12 (outdated - incompatible)
+        uses: actions/setup-node@v4
+        with:
+          node-version: '12'
+
+      - name: Install dependencies
+        run: |
+          node --version
+          npm install
+          # Will fail: bcrypt needs Node >=14 for native bindings
+          # mongoose 6.x requires Node >=12 but has issues with Node 12
+          # Jest 27 has known issues with Node 12 ESM handling
+
+  # ── Job 2: FAILS with real ESLint code quality errors ──
+  lint-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js 18
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Run ESLint
+        run: |
+          npx eslint src/index.js src/auth.js --format=stylish
+          # Real errors that will be caught:
+          # no-undef: 'UserModel' is not defined
+          # no-undef: 'port' is not defined
+          # no-unused-vars: variables declared but not used
+          # require-await: async function with no await expression
+
+  # ── Job 3: FAILS with real Jest test failures ──
+  unit-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js 18
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Run Jest tests
+        run: |
+          npx jest --testPathPattern=src/app.test.js \
+            --forceExit \
+            --detectOpenHandles \
+            --verbose
+          # Real failures:
+          # Test 1: MongoDB not connected - ReferenceError UserModel undefined
+          # Test 2: Expected 201 received 200 - wrong status code assertion
+          # Test 3: Cannot read property 'id' of undefined - verifyToken returns undefined
+
+  # ── Job 4: FAILS with real dependency security audit ──
+  security-audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js 18
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Run npm security audit
+        run: |
+          npm audit --audit-level=moderate
+          # Will fail: older versions of jsonwebtoken 8.5.1 has known
+          # vulnerabilities (CVE-2022-23539, CVE-2022-23540)
+          # dotenv 10.0.0 is outdated and has known issues
+          # These are real CVEs that npm audit detects
+
+  # ── Job 5: FAILS with real build/syntax error ──
+  build-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js 18
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Check syntax and try to start app
+        run: |
+          # Check for syntax errors using node --check
+          node --check src/auth.js
+          node --check src/index.js
+
+          # Try to start app (will fail on ReferenceError: port is not defined)
+          timeout 10 node src/index.js || exit 1
